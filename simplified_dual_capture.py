@@ -1,6 +1,7 @@
 """
 Simplified Dual High-Speed Camera Capture System
 Focus: Image capture, synchronization, and FPS reporting
+WITH GPIO HARDWARE SYNCHRONIZATION FOR BLACKFLY S CAMERAS
 """
 
 import PySpin
@@ -14,11 +15,15 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 class SimplifiedDualCapture:
-    def __init__(self, enable_display=True):
+    def __init__(self, enable_display=True, enable_gpio_sync=True):
         self.system = None
         self.cameras = []
         self.camera_list = None
         self.running = False
+        
+        # GPIO Synchronization
+        self.enable_gpio_sync = enable_gpio_sync
+        self.primary_camera_index = 0  # First camera will be primary
         
         self.output_dir = "synchronized_captures"
         self.individual_dir = "individual_frames"
@@ -59,6 +64,9 @@ class SimplifiedDualCapture:
         print("🚀 SIMPLIFIED DUAL HIGH-SPEED CAPTURE SYSTEM")
         print("=" * 50)
         print("📸 Synchronized dual camera capture")
+        print(f"🔗 GPIO Hardware Sync: {'ENABLED' if enable_gpio_sync else 'DISABLED'}")
+        if enable_gpio_sync:
+            print("   Primary camera will trigger secondary camera via GPIO")
         print("💾 SYNC images saved to: synchronized_captures/")
         if self.save_individual_frames:
             print("💾 Individual images saved to: individual_frames/")
@@ -70,6 +78,97 @@ class SimplifiedDualCapture:
         if self.enable_motion_detection:
             print(f"   Enhanced detection - ignores light reflections")
             print(f"   Threshold: 200+ significantly changed pixels")
+
+    def configure_gpio_sync(self, primary_cam, secondary_cam, primary_index, secondary_index):
+        """Configure GPIO synchronization for Blackfly S cameras"""
+        try:
+            primary_nodemap = primary_cam.GetNodeMap()
+            secondary_nodemap = secondary_cam.GetNodeMap()
+            
+            print(f"🔗 Configuring GPIO synchronization...")
+            print(f"   Primary: Camera {primary_index + 1} (triggers secondary)")
+            print(f"   Secondary: Camera {secondary_index + 1} (triggered by primary)")
+            
+            # Configure PRIMARY camera (strobe output)
+            # Line1 = Pin 4 (white wire) = Opto-isolated output
+            line_selector_primary = PySpin.CEnumerationPtr(primary_nodemap.GetNode("LineSelector"))
+            if PySpin.IsAvailable(line_selector_primary) and PySpin.IsWritable(line_selector_primary):
+                line1_entry = line_selector_primary.GetEntryByName("Line1")
+                if PySpin.IsAvailable(line1_entry):
+                    line_selector_primary.SetIntValue(line1_entry.GetValue())
+                    
+                    # Set Line1 to Output mode
+                    line_mode = PySpin.CEnumerationPtr(primary_nodemap.GetNode("LineMode"))
+                    if PySpin.IsAvailable(line_mode) and PySpin.IsWritable(line_mode):
+                        output_mode = line_mode.GetEntryByName("Output")
+                        if PySpin.IsAvailable(output_mode):
+                            line_mode.SetIntValue(output_mode.GetValue())
+                    
+                    # Set Line1 source to ExposureActive (triggers when exposure starts)
+                    line_source = PySpin.CEnumerationPtr(primary_nodemap.GetNode("LineSource"))
+                    if PySpin.IsAvailable(line_source) and PySpin.IsWritable(line_source):
+                        exposure_active = line_source.GetEntryByName("ExposureActive")
+                        if PySpin.IsAvailable(exposure_active):
+                            line_source.SetIntValue(exposure_active.GetValue())
+            
+            # Enable 3.3V output on Line2 (Pin 3 - red wire) for pull-up resistor
+            line_selector_primary.SetIntValue(line_selector_primary.GetEntryByName("Line2").GetValue())
+            v33_enable = PySpin.CBooleanPtr(primary_nodemap.GetNode("V3_3Enable"))
+            if PySpin.IsAvailable(v33_enable) and PySpin.IsWritable(v33_enable):
+                v33_enable.SetValue(True)
+                print("   ✅ Primary camera: 3.3V output enabled (Pin 3)")
+            
+            # Configure SECONDARY camera (trigger input)
+            # First, turn off trigger mode to configure it
+            trigger_mode_secondary = PySpin.CEnumerationPtr(secondary_nodemap.GetNode("TriggerMode"))
+            if PySpin.IsAvailable(trigger_mode_secondary) and PySpin.IsWritable(trigger_mode_secondary):
+                trigger_off = trigger_mode_secondary.GetEntryByName("Off")
+                if PySpin.IsAvailable(trigger_off):
+                    trigger_mode_secondary.SetIntValue(trigger_off.GetValue())
+            
+            # Set trigger source to Line3 (Pin 1 - green wire = VAUX input)
+            trigger_source = PySpin.CEnumerationPtr(secondary_nodemap.GetNode("TriggerSource"))
+            if PySpin.IsAvailable(trigger_source) and PySpin.IsWritable(trigger_source):
+                line3_entry = trigger_source.GetEntryByName("Line3")
+                if PySpin.IsAvailable(line3_entry):
+                    trigger_source.SetIntValue(line3_entry.GetValue())
+                    print("   ✅ Secondary camera: Trigger source set to Line3 (Pin 1)")
+            
+            # Set trigger overlap to ReadOut for maximum frame rate
+            trigger_overlap = PySpin.CEnumerationPtr(secondary_nodemap.GetNode("TriggerOverlap"))
+            if PySpin.IsAvailable(trigger_overlap) and PySpin.IsWritable(trigger_overlap):
+                readout_entry = trigger_overlap.GetEntryByName("ReadOut")
+                if PySpin.IsAvailable(readout_entry):
+                    trigger_overlap.SetIntValue(readout_entry.GetValue())
+                    print("   ✅ Secondary camera: Trigger overlap set to ReadOut")
+            
+            # Enable trigger mode on secondary camera
+            if PySpin.IsAvailable(trigger_mode_secondary) and PySpin.IsWritable(trigger_mode_secondary):
+                trigger_on = trigger_mode_secondary.GetEntryByName("On")
+                if PySpin.IsAvailable(trigger_on):
+                    trigger_mode_secondary.SetIntValue(trigger_on.GetValue())
+                    print("   ✅ Secondary camera: Trigger mode enabled")
+            
+            print("🔗 GPIO synchronization configured successfully!")
+            print("   📋 Wiring check:")
+            print("      Primary Pin 4 (white) → Secondary Pin 1 (green)")
+            print("      Primary Pin 5 (blue) → Secondary Pin 6 (brown)") 
+            print("      Primary Pin 6 (brown) → Secondary Pin 6 (brown)")
+            print("      10kΩ resistor: Primary Pin 3 (red) → Primary Pin 4 (white)")
+            
+            # Verify trigger mode is still enabled
+            trigger_mode_verify = PySpin.CEnumerationPtr(secondary_nodemap.GetNode("TriggerMode"))
+            if PySpin.IsAvailable(trigger_mode_verify) and PySpin.IsReadable(trigger_mode_verify):
+                current_mode = trigger_mode_verify.GetCurrentEntry().GetSymbolic()
+                print(f"   🔍 Secondary camera trigger mode: {current_mode}")
+                if current_mode != "On":
+                    print("   ⚠️ WARNING: Trigger mode not active!")
+                    
+            return True
+            
+        except PySpin.SpinnakerException as ex:
+            print(f"❌ Error configuring GPIO sync: {ex}")
+            return False
 
     def create_output_directories(self):
         if not os.path.exists(self.output_dir):
@@ -159,14 +258,14 @@ class SimplifiedDualCapture:
         if PySpin.IsAvailable(gain_node) and PySpin.IsWritable(gain_node):
             gain_node.SetValue(min(20.0, gain_node.GetMax()))
 
-        # Set frame rate to 500 FPS
+        # Set frame rate to 350 FPS for better GPIO sync
         acq_frame_rate_enable = PySpin.CBooleanPtr(nodemap.GetNode("AcquisitionFrameRateEnable"))
         if PySpin.IsAvailable(acq_frame_rate_enable) and PySpin.IsWritable(acq_frame_rate_enable):
             acq_frame_rate_enable.SetValue(True)
 
         acq_frame_rate = PySpin.CFloatPtr(nodemap.GetNode("AcquisitionFrameRate"))
         if PySpin.IsAvailable(acq_frame_rate) and PySpin.IsWritable(acq_frame_rate):
-            target_fps = 500.0
+            target_fps = 350.0  # Reduced from 500 for better GPIO sync
             max_fps = acq_frame_rate.GetMax()
             final_fps = min(target_fps, max_fps)
             acq_frame_rate.SetValue(final_fps)
@@ -229,6 +328,22 @@ class SimplifiedDualCapture:
                 if self.enable_display:
                     self.display_queues[i+1] = Queue(maxsize=2)
 
+            # Configure GPIO synchronization if enabled and we have 2+ cameras
+            if self.enable_gpio_sync and len(self.cameras) >= 2:
+                primary_cam = self.cameras[self.primary_camera_index]['camera']
+                secondary_index = 1 if self.primary_camera_index == 0 else 0
+                secondary_cam = self.cameras[secondary_index]['camera']
+                
+                success = self.configure_gpio_sync(
+                    primary_cam, secondary_cam, 
+                    self.primary_camera_index, 
+                    secondary_index
+                )
+                
+                if not success:
+                    print("⚠️ GPIO sync configuration failed - continuing with software sync")
+                    self.enable_gpio_sync = False
+
             return len(self.cameras) > 0
 
         except PySpin.SpinnakerException as ex:
@@ -243,7 +358,7 @@ class SimplifiedDualCapture:
 
         try:
             cam.BeginAcquisition()
-            print(f'🚀 Started capture for camera {camera_id} - targeting 500 FPS')
+            print(f'🚀 Started capture for camera {camera_id} - targeting 350 FPS')
 
             while self.running:
                 try:
@@ -371,7 +486,7 @@ class SimplifiedDualCapture:
                 self.save_individual_frame(camera_id, frame_info)
             
             # Try to find a matching frame from other camera(s) within 50ms window (increased for better sync)
-            sync_tolerance_ms = 50  # Increased tolerance for better synchronization
+            sync_tolerance_ms = 10  # Increased tolerance for better synchronization
             
             # Look for frames from other cameras within the time window
             matching_frames = {camera_id: frame_info}
@@ -621,7 +736,7 @@ class SimplifiedDualCapture:
         display_width = int(display_height * aspect_ratio)
         cv2.resizeWindow(window_name, display_width, display_height)
         
-        print(f'📺 Started live display for camera {camera_id} - 500 FPS capture mode')
+        print(f'📺 Started live display for camera {camera_id} - 350 FPS capture mode')
 
         while self.running:
             try:
@@ -670,7 +785,31 @@ class SimplifiedDualCapture:
             pass
 
 def main():
-    capture_system = SimplifiedDualCapture()
+    import sys
+    
+    # Check for command line options
+    enable_gpio_sync = True
+    enable_display = True
+    
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            if arg.lower() in ['--no-gpio', '--software-only']:
+                enable_gpio_sync = False
+                print("🔧 GPIO sync disabled via command line")
+            elif arg.lower() in ['--no-display', '--headless']:
+                enable_display = False
+                print("🔧 Display disabled via command line")
+            elif arg.lower() in ['--help', '-h']:
+                print("📋 Usage: python simplified_dual_capture.py [options]")
+                print("   --no-gpio        Disable GPIO hardware synchronization")
+                print("   --no-display     Run without live display windows")
+                print("   --help           Show this help message")
+                return
+    
+    capture_system = SimplifiedDualCapture(
+        enable_display=enable_display,
+        enable_gpio_sync=enable_gpio_sync
+    )
     
     try:
         if not capture_system.initialize_system(): 
