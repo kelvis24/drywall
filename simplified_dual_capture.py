@@ -204,10 +204,24 @@ class SimplifiedDualCapture:
             if PySpin.IsAvailable(mono8) and PySpin.IsReadable(mono8):
                 pixel_format.SetIntValue(mono8.GetValue())
 
-        # Set ROI dimensions
-        roi_width, roi_height = 720, 150
-        roi_offset_x, roi_offset_y = 0, 196
+        # Get camera serial for specific configuration
+        device_serial = PySpin.CStringPtr(cam.GetTLDeviceNodeMap().GetNode('DeviceSerialNumber'))
+        serial_number = device_serial.GetValue() if PySpin.IsAvailable(device_serial) and PySpin.IsReadable(device_serial) else 'Unknown'
         
+        # Set ROI dimensions - different for each camera
+        roi_width = 720  # Same width for both cameras
+        roi_height = 150  # Same height for both cameras
+        
+        # Adjust offsets based on camera
+        if camera_index == 0:  # Camera 1 (first camera)
+            roi_offset_x = 0
+            roi_offset_y = 246  # Adjusted to focus more on the window area
+            print(f"📷 Camera 1 (Serial: {serial_number}) - Configuring for side view at window")
+        else:  # Camera 2 (second camera)
+            roi_offset_x = 0
+            roi_offset_y = 220  # Original offset for Camera 2
+            print(f"📷 Camera 2 (Serial: {serial_number}) - Maintaining current view")
+
         # Get dimension nodes
         width_node = PySpin.CIntegerPtr(nodemap.GetNode("Width"))
         height_node = PySpin.CIntegerPtr(nodemap.GetNode("Height"))
@@ -235,6 +249,8 @@ class SimplifiedDualCapture:
         if PySpin.IsAvailable(offset_y_node) and PySpin.IsWritable(offset_y_node):
             max_offset_y = height_node.GetMax() - height_node.GetValue()
             offset_y_node.SetValue(min(roi_offset_y, max_offset_y))
+
+        print(f'🎯 Camera {camera_index+1} ROI: {width_node.GetValue()}x{height_node.GetValue()} at offset y={offset_y_node.GetValue()}')
 
         # Disable auto exposure and set manual values
         auto_exposure = PySpin.CEnumerationPtr(nodemap.GetNode("ExposureAuto"))
