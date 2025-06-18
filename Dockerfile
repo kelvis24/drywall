@@ -1,5 +1,5 @@
 # YOLOv5 Ball Detection Camera System - Docker Container
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
 # Avoid timezone prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -28,7 +28,7 @@ RUN apt-get update && apt-get install -y \
     libatlas-base-dev \
     libtbb2 \
     libtbb-dev \
-    libdc1394-22-dev \
+    libdc1394-dev \
     libopenexr-dev \
     libgstreamer-plugins-base1.0-dev \
     libgstreamer1.0-dev \
@@ -51,7 +51,7 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Install OpenCV and other ML packages
-RUN pip install opencv-python opencv-contrib-python numpy
+RUN pip install opencv-python opencv-contrib-python "numpy<2"
 
 # Install YOLOv5 dependencies
 RUN pip install \
@@ -67,14 +67,58 @@ RUN pip install \
     psutil \
     thop
 
+# Install Spinnaker SDK libraries first (required for PySpin)
+COPY *.deb /tmp/
+
+# Install dependencies that Spinnaker might need
+RUN apt-get update && apt-get install -y \
+    libc6 \
+    libgcc-s1 \
+    libstdc++6 \
+    libusb-1.0-0 \
+    libavahi-client3 \
+    libavahi-common3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Spinnaker .deb packages with verbose output and error checking
+# Set environment to avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Extract and install .deb packages manually to bypass EULA scripts
+RUN echo "Extracting libgentl..." && \
+    dpkg-deb -x /tmp/libgentl_*.deb / && \
+    echo "libgentl extracted successfully"
+
+RUN echo "Extracting libspinnaker..." && \
+    dpkg-deb -x /tmp/libspinnaker_*.deb / && \
+    echo "libspinnaker extracted successfully"
+
+RUN echo "Extracting libspinnaker-c..." && \
+    dpkg-deb -x /tmp/libspinnaker-c_*.deb / && \
+    echo "libspinnaker-c extracted successfully"
+
+RUN echo "Extracting spinupdate..." && \
+    dpkg-deb -x /tmp/spinupdate_*.deb / && \
+    echo "spinupdate extracted successfully"
+
+RUN echo "Extracting libspinvideo..." && \
+    dpkg-deb -x /tmp/libspinvideo_*.deb / && \
+    echo "libspinvideo extracted successfully"
+
+RUN echo "Extracting libspinvideo-c..." && \
+    dpkg-deb -x /tmp/libspinvideo-c_*.deb / && \
+    echo "libspinvideo-c extracted successfully"
+
+# Fix any dependency issues
+RUN apt-get update && apt-get install -f -y
+
+# Configure library paths and verify installation
+RUN ldconfig
+RUN echo "Checking for libSpinnaker.so..." && find /usr -name "libSpinnaker.so*" 2>/dev/null || echo "libSpinnaker.so not found"
+
 # Install PySpin SDK for Blackfly cameras
-# Copy and install the PySpin wheel file - bypass platform checks
 COPY spinnaker_python*.whl /tmp/
-RUN cd /tmp && \
-    unzip -q spinnaker_python*.whl && \
-    cp -r PySpin* /usr/local/lib/python3.8/dist-packages/ && \
-    cp -r spinnaker_python*.dist-info /usr/local/lib/python3.8/dist-packages/ || \
-    echo "Manual extraction completed"
+RUN pip install /tmp/spinnaker_python*.whl
 
 # Install additional packages that help with PySpin
 RUN pip install \

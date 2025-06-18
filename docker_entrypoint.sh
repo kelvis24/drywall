@@ -43,19 +43,39 @@ fi
 echo "🚀 Starting camera capture system..."
 echo "📸 Your custom model will work perfectly in Linux environment!"
 
-# Run the main application
-if [ -f "help.py" ]; then
-    echo "🎯 Running help.py with custom model support..."
-    python help.py $DISPLAY_MODE
-elif [ -f "me.py" ]; then
-    echo "🎯 Running me.py..."
-    python me.py $DISPLAY_MODE
+# Check if PySpin is available
+if python -c "import PySpin" 2>/dev/null; then
+    echo "✅ PySpin is available - running full camera system"
+    # Run the main application
+    if [ -f "help.py" ]; then
+        echo "🎯 Running help.py with custom model support..."
+        python help.py $DISPLAY_MODE
+    elif [ -f "me.py" ]; then
+        echo "🎯 Running me.py..."
+        python me.py $DISPLAY_MODE
+    else
+        echo "❌ No main script found!"
+        echo "📋 Available files:"
+        ls -la *.py
+        
+        # Keep container running for debugging
+        echo "🐛 Keeping container alive for debugging..."
+        tail -f /dev/null
+    fi
 else
-    echo "❌ No main script found!"
-    echo "📋 Available files:"
-    ls -la *.py
+    echo "⚠️ PySpin not available - running test mode"
+    # Run the test script instead
+    if [ -f "test_docker.py" ]; then
+        echo "🧪 Running Docker container test..."
+        python test_docker.py
+    else
+        echo "❌ Test script not found!"
+        echo "📋 Available files:"
+        ls -la *.py
+    fi
     
     # Keep container running for debugging
-    echo "🐛 Keeping container alive for debugging..."
+    echo "🐛 Container is running in test mode - keeping alive for debugging..."
+    echo "💡 To exit, run: docker stop ball-detection-cameras"
     tail -f /dev/null
 fi 
