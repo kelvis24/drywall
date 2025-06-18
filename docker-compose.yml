@@ -1,0 +1,30 @@
+services:
+  yolo-camera-system:
+    build: .
+    container_name: ball-detection-cameras
+    privileged: true  # Needed for camera access
+    
+    # Mount your local directory
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw  # For GUI display
+      
+    # Device access for cameras
+    devices:
+      - /dev/bus/usb:/dev/bus/usb  # USB access for cameras
+      
+    # Network access
+    network_mode: host
+    
+    # Environment variables
+    environment:
+      - DISPLAY=${DISPLAY}  # For GUI windows
+      - QT_X11_NO_MITSHM=1
+      - PYTHONUNBUFFERED=1
+      
+    # Keep stdin open and allocate pseudo-TTY
+    stdin_open: true
+    tty: true
+    
+    # Restart policy
+    restart: unless-stopped 
